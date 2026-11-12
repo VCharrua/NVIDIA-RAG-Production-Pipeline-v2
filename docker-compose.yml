@@ -1,0 +1,62 @@
+services:
+  llm:
+    image: ${NIM_LLM_IMAGE:-nvcr.io/nvidia/llama-3.1-8b-instruct:1.3.3}
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8000:8000"
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY:?Set NGC_API_KEY to pull NIM images}
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    shm_size: 16gb
+
+  embedding:
+    image: ${NIM_EMBEDDING_IMAGE:-nvcr.io/nvidia/nv-embedqa-e5-v5:1.5.0}
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8001:8000"
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY:?Set NGC_API_KEY to pull NIM images}
+    volumes:
+      - ${LOCAL_NIM_CACHE:-~/.cache/nim}:/opt/nim/.cache
+    shm_size: 8gb
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - llm
+      - embedding
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8080:8080"
+    environment:
+      NVIDIA_LLM_BASE_URL: http://llm:8000/v1
+      NVIDIA_EMBEDDING_BASE_URL: http://embedding:8000/v1
+      RAG_DATA_DIR: /app/kaggle/input/rag-data
+      RAG_INDEX_DIR: /app/artifacts/index
+    volumes:
+      - ./kaggle:/app/kaggle:ro
+      - ./artifacts:/app/artifacts
+    command: ["uvicorn", "nvidia_rag.api:app", "--host", "0.0.0.0", "--port", "8080"]
